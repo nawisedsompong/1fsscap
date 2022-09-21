@@ -195,6 +195,43 @@ entity PRORATED_CLAIMS_YTD2 as
 		beClmDiv.Division_Desc
    	};
    	
+define view MEDISAVE_REPORT as select from PRORATED_CLAIMS_YTD as prorated
+inner join MEDISAVE_CLAIM_CODE as medclaimcode
+on prorated.CLAIM_CODE_VALUE = medclaimcode.Claim_code
+inner join sf.PerPersonalView as empName
+on empName.personIdExternal = prorated.EMPLOYEE{
+	prorated.CLAIM_CODE_VALUE,
+	prorated.ENTITLEMENT,
+	prorated.TAKEN_AMOUNT,
+	prorated.PENDING_AMOUNT,
+	prorated.YEAR,
+	prorated.EMPLOYEE,
+	prorated.BALANCE,
+	CASE WHEN prorated.BALANCE < 0  then 0
+	else prorated.BALANCE * 50/100 end as MEDISAVE_CREDIT : Decimal(10,2),
+	empName.fullName as EMPLOYEE_NAME
+};
+   
+   
+define view MEDISAVE_CLAIM_CODE as select from be.Company_Claim_Category as Category
+left join MEDISAVE_DEPEND_CODE as dependents
+ON Category.Claim_code = dependents.Dependent_Claim_Code
+{
+	Category.Claim_code
+}
+WHERE Category.Category_Code = 'MC' 
+AND Category.Company = 'MOHH' 
+AND dependents.Dependent_Claim_Code IS NULL
+and Category.Claim_code not like '%_EFMR'
+and Category.Claim_code <> 'VCMMR' and Category.Claim_code <> 'VCTDAP' ;
+
+define view MEDISAVE_DEPEND_CODE as select from be.Benefit_Claim_Admin
+{
+	Dependent_Claim_Code
+}
+where Claim_Category = 'MC' and Dependent_Claim_Code is not null AND Company= 'MOHH'
+and Start_Date <= $now and End_Date >= $now;
+   
 entity THREAD_JOB_INFO {
 
    key id:Integer;

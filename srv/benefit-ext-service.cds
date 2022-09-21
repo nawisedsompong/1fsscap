@@ -15,6 +15,9 @@ service CalculationService @(path:'/calclaim')@(impl:'./benefit-ext-service.js')
    //@readonly entity getClaimBalanceDetails(USER_ID:String(50),CLAIM_CODE_IN:String(50),ELIGIBILITY:String(50)) as select from cal.GET_TAKEN_PENDING(USER_ID: :USER_ID,CLAIM_CODE_IN: :CLAIM_CODE_IN,ELIGIBILITY: :ELIGIBILITY);
     @readonly entity getClaimBalanceDetails(USER_ID:String(50),CLAIM_YEAR:String(13)) as select from cal.GET_TAKEN_PENDING(USER_ID: :USER_ID,CLAIM_YEAR: :CLAIM_YEAR);
     @readonly entity getClaimBalanceDetailsall(USER_ID:String(50) ,CLAIM_YEAR:String(13)) as select from cal.GET_TAKEN_PENDING_ALL(USER_ID: :USER_ID,CLAIM_YEAR: :CLAIM_YEAR);
+    @cds.query.limit.max: 500000
+	@cds.query.limit.default: 500000
+    @readonly entity MEDISAVE_REPORT as select from cal.MEDISAVE_REPORT;
     function getSDFClaimBalanceDetails(USER_ID: String(50)) returns {
     	ENTITLEMENT: Decimal(10,2);
     	UNUTILIZED_AMOUNT: Decimal(10,2); 
@@ -54,6 +57,7 @@ service CalculationService @(path:'/calclaim')@(impl:'./benefit-ext-service.js')
 	   CUST_CURRENCY: String;
 	   CUST_ACCOUNTOWNER: String;
 	   CUST_BANKACCOUNTNUMBER: String;
+	   CUST_VENDORCODE: String;
    };
    
  }

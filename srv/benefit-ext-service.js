@@ -1331,12 +1331,32 @@ module.exports = async(srv) => {
 				var numberofWroksheet = workbook._worksheets.length;
 				var worksheet = workbook.getWorksheet(1);
 				var claimName = worksheet.name;
-				var tableDetails = tableDetails_Query(claimName);
-
-				tableArray.push({
-					"table": tableDetails[0].table,
-					"name": tableDetails[0].label
-				});
+				var tableDetails;
+				var tx = cds.transaction(req);
+				await tx.begin();
+				try {
+					tableDetails = tableDetails_Query(claimName);
+					tableArray.push({
+						"table": tableDetails[0].table,
+						"name": tableDetails[0].label
+					});
+				} catch(err) {
+					console.log(err);
+					var errMsg = 'Invalid sheet name in excel template. It must be "Pay Upload Temp".';
+					var logExistResult = await tx.run(`SELECT * FROM "CALCULATION_UPLOAD_ERRLOG" WHERE "ID"='${IDKey}'`);
+					if (logExistResult.length > 0) {
+						await tx.run(`UPDATE "CALCULATION_UPLOAD_ERRLOG" SET "ERROR"='${errMsg}', "SUCCESS"='' WHERE "ID"='${IDKey}'`);
+					} else {
+						await tx.run(INSERT.into(upload_errlog).entries({
+							id: IDKey,
+							error: errMsg,
+							success: ''
+						}));
+					}
+					await tx.commit();
+					return;
+				}
+				
 				for (var numw = 1; numw < numberofWroksheet; numw++) {
 					var worksheet = workbook.getWorksheet(numw);
 					rowArray = [];
@@ -1345,11 +1365,13 @@ module.exports = async(srv) => {
 					}, function (row, rowNumber) {
 						console.log("Row " + rowNumber + " = " + JSON.stringify(row.values));
 						var rowaftersplice = Object.assign([], row.values);
-						rowaftersplice.splice(0, 1)
-						if (rowNumber == 1) {
-							keyHeader = rowaftersplice;
-						} else {
-							rowArray.push(rowaftersplice);
+						rowaftersplice.splice(0, 1);
+						if (rowaftersplice.length > 0) {
+							if (rowNumber == 1) {
+								keyHeader = rowaftersplice;
+							} else {
+								rowArray.push(rowaftersplice);
+							}
 						}
 					});
 					
@@ -1359,10 +1381,9 @@ module.exports = async(srv) => {
 						keyHeader.forEach((key, j) => {
 							var type = tableArray[numw - 1].table.elements[key].type;
 							result[key] = rowArray[i][j] == undefined ? (type == "cds.Decimal" ? 0.00 : '') : rowArray[i][j];
-							result[key] = (type == "cds.Decimal" ? (isNaN(result[key]) || result[key] == '' ? 0.00 : parseFloat(result[key])) : result[
-								key]);
+							result[key] = (type == "cds.Decimal" ? (isNaN(result[key]) || result[key] == '' ? 0.00 : parseFloat(result[key])) : result[key]);
 							result[key] = (type == "cds.Integer" ? (isNaN(result[key]) || result[key] == '' ? 0 : parseInt(result[key])) : result[key]);
-							result[key] = (type == "cds.Date" ? (result[key].toISOString().split('T')[0]) : result[key]);
+							result[key] = (type == "cds.Date" && result[key]) ? (result[key].toISOString().split('T')[0]) : result[key];
 							
 							if (key === 'SCHOLAR_ID') {
 								result[key] = (rowArray[i][j] !== undefined && rowArray[i][j] !== null) ? rowArray[i][j].toString() : rowArray[i][j];
@@ -1374,24 +1395,33 @@ module.exports = async(srv) => {
 					}
 					console.log(entries);
 				}
-				var tx = cds.transaction(req);
-				await tx.begin();
+				
 				try {
 					let deletedReocrds = await tx.run(`DELETE FROM "CALCULATION_PAY_UP"`);
 					console.log(deletedReocrds);
 					var insert = await tx.run(INSERT.into(PAY_UP).entries(entries));
-					await tx.run(INSERT.into(upload_errlog).entries({
-						id: IDKey,
-						error: '',
-						success: 'Successfully Uploaded'
-					}));
+					var logExistResult2 = await tx.run(`SELECT * FROM "CALCULATION_UPLOAD_ERRLOG" WHERE "ID"='${IDKey}'`);
+					if (logExistResult2.length > 0) {
+						await tx.run(`UPDATE "CALCULATION_UPLOAD_ERRLOG" SET "SUCCESS"='Successfully Uploaded', "ERROR"='' WHERE "ID"='${IDKey}'`);
+					} else {
+						await tx.run(INSERT.into(upload_errlog).entries({
+							id: IDKey,
+							error: '',
+							success: 'Successfully Uploaded'
+						}));
+					}
 				} catch (err) {
 					console.log(err);
-					await tx.run(INSERT.into(upload_errlog).entries({
-						id: IDKey,
-						error: err.message,
-						success: ''
-					}));
+					var logExistResult3 = await tx.run(`SELECT * FROM "CALCULATION_UPLOAD_ERRLOG" WHERE "ID"='${IDKey}'`);
+					if (logExistResult3.length > 0) {
+						await tx.run(`UPDATE "CALCULATION_UPLOAD_ERRLOG" SET "ERROR"='${err.message}', "SUCCESS"='' WHERE "ID"='${IDKey}'`);
+					} else {
+						await tx.run(INSERT.into(upload_errlog).entries({
+							id: IDKey,
+							error: err.message,
+							success: ''
+						}));
+					}
 				}
 				await tx.commit();
 			});
@@ -1615,7 +1645,14 @@ module.exports = async(srv) => {
 				"BANK"."CUST_BANKNAME",
 				"BANK"."CUST_CURRENCY",
 				"BANK"."CUST_ACCOUNTOWNER",
-				"BANK"."CUST_BANKACCOUNTNUMBER"
+				"BANK"."CUST_BANKACCOUNTNUMBER",
+				"BANK"."CUST_PRIMARYBANKACCOUNTSTR",
+				"BANK"."CUST_VENDORCODE",
+				"OVRSEAS_BANK"."CUST_ACCOUNTOWNER" AS "OVRSEAS_CUST_ACCOUNTOWNER",
+				"OVRSEAS_BANK"."CUST_BANKACCOUNTNUMBER" AS "OVRSEAS_CUST_BANKACCOUNTNUMBER",
+				"OVRSEAS_BANK"."CUST_CURRENCY" AS "OVRSEAS_CUST_CURRENCY",
+				"OVRSEAS_BANK"."CUST_BANK" AS "OVRSEAS_CUST_BANKNAME",
+				"OVRSEAS_BANK"."CUST_PRIMARYBANKSTR" AS "OVRSEAS_CUST_PRIMARYBANKSTR"
 			FROM "CALCULATION_PAY_UP" AS "PAY_UP"
 			LEFT JOIN "SF_SCHOLAR_SCHEME" AS "SCH"
 			ON "SCH"."EXTERNALCODE" = "PAY_UP"."SCHOLAR_ID"
@@ -1627,6 +1664,8 @@ module.exports = async(srv) => {
 			ON "SCH"."CUST_SCHOLARSHIPSCHEME" = "GL_MAP"."SCHOLAR_SCHEME"
 			LEFT JOIN "SF_BANK_ACC" AS "BANK"
 			ON "BANK"."EXTERNALCODE"= "PAY_UP"."SCHOLAR_ID"
+			LEFT JOIN "SF_OVERSEAS_BANK" AS "OVRSEAS_BANK"
+			ON "OVRSEAS_BANK"."CUST_BANKACCOUNT_EXTERNALCODE"= "PAY_UP"."SCHOLAR_ID"
 			LEFT JOIN "BENEFIT_CLAIM_CODE" AS "CLAIM_MASTER"
 			ON "CLAIM_MASTER"."CLAIM_CODE"="PAY_UP"."CLAIM_CODE"
 			WHERE "PAY_UP"."UPLOAD_REFERENCE_ID"='${id}'
@@ -1648,6 +1687,7 @@ module.exports = async(srv) => {
 			} else {
 				lineItemErrorMsg += `Scholar ID is required.`;
 			}
+			
 			if (payUpResult[i].VENDOR_CODE) {
 				if (paymentTo === 'Scholar') {
 					let bankVendorResult = await tx.run(
@@ -1658,25 +1698,60 @@ module.exports = async(srv) => {
 					}
 				} else {
 					let vendorResult = await tx.run(
-						`SELECT "VENDOR_CODE" FROM "BENEFIT_VENDOR" WHERE "SCHOLAR_SCHEME"= '${payUpResult[i].CUST_SCHOLARSHIPSCHEME}' AND "VENDOR_CODE"='${payUpResult[i].VENDOR_CODE}'`
+						`SELECT "VENDOR_CODE" FROM "BENEFIT_VENDOR" WHERE "VENDOR_CODE"='${payUpResult[i].VENDOR_CODE}'`
 					);
 					if (vendorResult.length === 0) {
 						lineItemErrorMsg += `Invalid Vendor Code.`;
 					}
 				}
+			} else if (paymentTo === 'Vendor') {
+				lineItemErrorMsg += `Vendor Code is required.`;
+			}
+			if (!payUpResult[i].ITEM_DESC) {
+				lineItemErrorMsg += `Item description is required.`;
 			}
 			if (payUpResult[i].CURRENCY) {
-				let currencyResult = await tx.run(
-					`SELECT "CUST_CURRENCY" FROM "SF_BANK_ACC" WHERE "EXTERNALCODE"='${payUpResult[i].SCHOLAR_ID}' AND "CUST_CURRENCY"='${payUpResult[i].CURRENCY}'`
-				);
-				if (currencyResult.length === 0) {
-					lineItemErrorMsg += `Invalid Currency. Currency must match scholar's primary bank currency.`;
+				if (payUpResult[i].CUST_PRIMARYBANKACCOUNTSTR === 'Y') {
+					let currencyResult = await tx.run(
+						`SELECT "CUST_CURRENCY" FROM "SF_BANK_ACC" WHERE "EXTERNALCODE"='${payUpResult[i].SCHOLAR_ID}' AND "CUST_CURRENCY"='${payUpResult[i].CURRENCY}'`
+					);
+					if (currencyResult.length === 0) {
+						lineItemErrorMsg += `Invalid Currency. Currency must match scholar's primary bank currency.`;
+					}
+				} else {
+					let currencyResult = await tx.run(
+						`SELECT "CUST_CURRENCY" FROM "SF_OVERSEAS_BANK" WHERE "CUST_BANKACCOUNT_EXTERNALCODE"='${payUpResult[i].SCHOLAR_ID}' AND "CUST_CURRENCY"='${payUpResult[i].CURRENCY}'`
+					);
+					if (currencyResult.length === 0) {
+						lineItemErrorMsg += `Invalid Currency. Currency must match scholar's primary bank currency.`;
+					}
 				}
 			}
 
 			if (payUpResult[i].INVOICE_DATE && new Date(payUpResult[i].INVOICE_DATE) > new Date()) {
 				lineItemErrorMsg += `Invalid Invoice Date. Invoice date should not be future date.`;
 			}
+			
+			if (paymentTo === 'Scholar' && payUpResult[i].OVRSEAS_CUST_PRIMARYBANKSTR === 'Y') {
+				payUpResult[i].CUST_BANKNAME = payUpResult[i].OVRSEAS_CUST_BANKNAME;
+				payUpResult[i].CUST_CURRENCY = payUpResult[i].OVRSEAS_CUST_CURRENCY;
+				payUpResult[i].CUST_ACCOUNTOWNER = payUpResult[i].OVRSEAS_CUST_ACCOUNTOWNER;
+				payUpResult[i].CUST_BANKACCOUNTNUMBER = payUpResult[i].OVRSEAS_CUST_BANKACCOUNTNUMBER;
+			}
+			
+			if (paymentTo === 'Vendor') {
+				payUpResult[i].CUST_BANKNAME = '';
+				payUpResult[i].CUST_CURRENCY = '';
+				payUpResult[i].CUST_ACCOUNTOWNER = '';
+				payUpResult[i].CUST_BANKACCOUNTNUMBER = '';
+				payUpResult[i].CUST_PRIMARYBANKACCOUNTSTR = '';
+				payUpResult[i].OVRSEAS_CUST_ACCOUNTOWNER = '';
+				payUpResult[i].OVRSEAS_CUST_BANKACCOUNTNUMBER = '';
+				payUpResult[i].OVRSEAS_CUST_CURRENCY = '';
+				payUpResult[i].OVRSEAS_CUST_BANKNAME = '';
+				payUpResult[i].OVRSEAS_CUST_PRIMARYBANKSTR = '';
+			}
+			
 			if (lineItemErrorMsg && !lineItemErrorMsg.includes(`Item ${i + 1}:`)) {
 				lineItemErrorMsg = `Item ${i + 1}: ` + lineItemErrorMsg;
 			}
